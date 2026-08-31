@@ -1,0 +1,6 @@
+Docker tips
+
+docker compose down -v (apaga os dados)
+docker compose down (apenas para de rodar)
+
+docker compose up -d (inicia tudo)
