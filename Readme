@@ -2,5 +2,19 @@ Docker tips
 
 docker compose down -v (apaga os dados)
 docker compose down (apenas para de rodar)
-
 docker compose up -d (inicia tudo)
+
+---
+
+Subindo a stack completa (postgres, rabbitmq, e os 5 serviços via imagem do GHCR):
+
+  cp .env.example .env
+  # editar .env: GITHUB_OWNER=<seu usuário/org do GitHub>
+  docker compose up -d
+
+Subindo a partir do código-fonte (repos clonados como irmãos deste):
+
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+Portas: gateway 8080, frontend 3000, user-service 8081, ticket-service 8082,
+notification-service 8083, rabbitmq management 15672, postgres 5432.

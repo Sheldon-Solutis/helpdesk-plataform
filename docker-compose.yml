@@ -11,6 +11,12 @@ services:
     volumes:
       - ./docker/init-db:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -18,12 +24,123 @@ services:
     restart: always
     ports:
       - "5672:5672"    # Porta AMQP para as aplicações
-      - "15672:15672"  # Painel Web de Administração (login: guest / guest)
+      - "15672:15672"  # Painel Web de Administração
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  user-service:
+    image: ghcr.io/${GITHUB_OWNER}/helpdesk-user-service:${TAG:-latest}
+    container_name: helpdesk-user-service
+    restart: always
+    environment:
+      SERVER_PORT: 8081
+      DATABASE_URL: jdbc:postgresql://postgres:5432/users_db
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  ticket-service:
+    image: ghcr.io/${GITHUB_OWNER}/helpdesk-ticket-service:${TAG:-latest}
+    container_name: helpdesk-ticket-service
+    restart: always
+    environment:
+      SERVER_PORT: 8082
+      DATABASE_URL: jdbc:postgresql://postgres:5432/tickets_db
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-guest}
+      USER_SERVICE_URL: http://user-service:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  notification-service:
+    image: ghcr.io/${GITHUB_OWNER}/helpdesk-notification-service:${TAG:-latest}
+    container_name: helpdesk-notification-service
+    restart: always
+    environment:
+      SERVER_PORT: 8083
+      DATABASE_URL: jdbc:postgresql://postgres:5432/notifications_db
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  api-gateway:
+    image: ghcr.io/${GITHUB_OWNER}/helpdesk-api-gateway:${TAG:-latest}
+    container_name: helpdesk-api-gateway
+    restart: always
+    environment:
+      SERVER_PORT: 8080
+      USER_SERVICE_URL: http://user-service:8081
+      TICKET_SERVICE_URL: http://ticket-service:8082
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
+    ports:
+      - "8080:8080"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      ticket-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/${GITHUB_OWNER}/helpdesk-frontend:${TAG:-latest}
+    container_name: helpdesk-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
 
 volumes:
   postgres_data:
